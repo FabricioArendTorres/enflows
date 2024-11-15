@@ -12,6 +12,7 @@ from enflows.transforms.injective.fixed_norm import (
     CondLpManifoldFlow,
     PositiveL1ManifoldFlow,
     SphereFlow,
+    DeformedSphereFlow,
     PeriodicElementwiseTransform,
     ScaleLastDim,
 )

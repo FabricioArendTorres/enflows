@@ -21,7 +21,7 @@ class SimpleNN(nn.Module):
         # self.mask[-1] = 0.
 
     def forward(self, x):
-        # x = self.mask * torch.cos(2*x) + (1 - self.mask) * torch.cos(4*x)
+        # x = torch.cos(16 * x) + torch.sin(16 * x)
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc12(x)
@@ -54,8 +54,6 @@ class SimpleNN_uncnstr(nn.Module):
         x = self.fc23(x)
         x = self.act3(x)
         x = self.fc3(x)
-        # x = self.act4(x) * torch.pi * 0.5
-        # x = torch.cos(x)
         return x
 
 
@@ -93,7 +91,7 @@ def spherical_to_cartesian_torch(arr):
     # meant for batches of vectors, i.e. arr.shape = (mb, n)
     assert arr.shape[1] >= 2
     check_tensor(arr)
-    eps = 1e-10
+    eps = 1e-3
     r = arr[:, -1:]
     angles = arr[:, :-1]
 
@@ -109,14 +107,24 @@ def spherical_to_cartesian_torch(arr):
     # assert torch.all(angles_clamped[:, :-1] < np.pi)
     # assert torch.all(angles_clamped[:, -1] > 0)
     # assert torch.all(angles_clamped[:, -1] < 2 * np.pi)
-    sin_prods = torch.cumprod(torch.sin(angles), dim=1) + eps
+
+    sin_prods = torch.cumprod(torch.sin(angles), dim=1)
+    sin_prods = mask_out_zeros(sin_prods, eps)
     # sin_prod_ = torch.cumsum(torch.sin(angles).log(), dim=1).exp()
     x1 = r * torch.cos(angles[:, :1])
     xs = r * sin_prods[:, :-1] * torch.cos(angles[:, 1:])
     xn = r * sin_prods[:, -1:]
-
     return torch.cat((x1, xs, xn), dim=1)
 
+def mask_out_zeros(arr, eps=1e-5):
+    cond_le0 = arr < 0
+    maskle0 = cond_le0.to(arr.dtype)
+    arr_le0 = torch.clamp(arr, max=-eps)
+    cond_ge0 = arr >= 0
+    maskge0 = cond_ge0.to(arr.dtype)
+    arr_ge0 = torch.clamp(arr, min=eps)
+
+    return maskle0 * arr_le0 + maskge0 * arr_ge0
 
 def cartesian_to_spherical_torch(arr):
     assert arr.shape[-1] >= 2
@@ -170,6 +178,7 @@ def jacobian_sph_to_car(spherical, cartesian):
     return jac
 
 from torch.utils.benchmark import Timer
+from datetime import timedelta
 
 def sherman_morrison_inverse(A):
     # check_tensor(A_triu)
@@ -179,12 +188,17 @@ def sherman_morrison_inverse(A):
     # A_triu_inv = torch.triangular_solve(eye, A_triu)[0]
     eps = 1e-5
 
+    torch.cuda.synchronize()
+    start_time = time.monotonic()
     A_triu_inv = torch.linalg.solve_triangular(A.triu() + eye * eps, eye, upper=True)
     # print(f"min: {A_triu_inv.min().item():.1f} max: {A_triu_inv.max().item():.1f}")
     # A_triu_inv = torch.linalg.inv(A_triu_eps)
     # check_tensor(A_triu_inv)
-    start_time = time.monotonic()
-
+    torch.cuda.synchronize()
+    end_time = time.monotonic()
+    time_diff = timedelta(seconds=end_time - start_time)
+    time_diff_seconds = str(time_diff).split(":")[-1]
+    print(time_diff)
     u = torch.zeros_like(A[:, :, -1:])
     u[:, -1, :] = 1.
     v = A[:, -1:, :-1]
@@ -198,8 +212,8 @@ def sherman_morrison_inverse(A):
     # den = 1 + (v @ A_triu_inv) @ u
     den = 1 + (v @ A_triu_inv)[...,-1:]
     # breakpoint()
-    end_time = time.monotonic()
-    total_time = end_time - start_time
+    # end_time = time.monotonic()
+    # total_time = end_time - start_time
     # print("sherman morrison detail: ", total_time)
 
     # assert not torch.any(den==0)
